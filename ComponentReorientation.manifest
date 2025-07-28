@@ -1,0 +1,13 @@
+{
+	"autodeskProduct":	"Fusion",
+	"type":	"addin",
+	"author":	"KP",
+	"description":	{
+		"":	"This add-in will reorient the selected component while maintaining the same orientation of the bodies inside it."
+	},
+	"version":	"",
+	"runOnStartup":	false,
+	"supportedOS":	"mac",
+	"editEnabled":	true,
+	"iconFilename":	"AddInIcon.svg"
+}
