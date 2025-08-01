@@ -1,5 +1,6 @@
 import adsk.core
 import os
+import math
 from ...lib import fusionAddInUtils as futil
 from ... import config
 import traceback
@@ -157,6 +158,59 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
 
     selectionInput = inputs.itemById("selectionInput")
     triadInput = inputs.itemById("triadInput")
+
+    global occurrence
+
+    if changed_input.id == 'selectionInput':
+        futil.log(f'selection count before: {selectionInput.selectionCount}')
+        
+        if selectionInput.selectionCount > 0:
+            occurrence = selectionInput.selection(0).entity
+
+            try:
+                boundingBox = occurrence.boundingBox
+                globalObjMin = boundingBox.minPoint
+                globalObjMax = boundingBox.maxPoint
+                globalObjCenterPoint = adsk.core.Point3D.create()
+                globalObjCenterPoint.setWithArray([(globalObjMax.x + globalObjMin.x) / 2, (globalObjMax.y + globalObjMin.y) / 2, (globalObjMax.z + globalObjMin.z) / 2])
+
+                futil.log(f'Global center: {globalObjCenterPoint.asArray()}')
+
+                objCenterTransform = adsk.core.Matrix3D.create()
+                objCenterTransform.translation = globalObjCenterPoint.asVector()
+
+                triadInput.setRotateVisibility(True)
+                # # triadInput.setTranslateVisibility(True)
+                # # triadInput.transform = objCenterTransform
+
+                objTransformToGlobalCenter = adsk.core.Matrix3D.create()
+                objTransformToGlobalCenter.translation = globalObjCenterPoint.asVector()
+                objTransformToGlobalCenter.invert()
+
+                originalTransform = occurrence.transform2
+                originalTransform.transformBy(objTransformToGlobalCenter)
+                occurrence.transform2 = originalTransform
+
+                futil.log(f'selection count: {selectionInput.selectionCount}')
+
+            except:
+                futil.log("ERROR:\n{}".format(traceback.format_exc()))
+
+            if occurrence:
+                futil.log(f"occurrence.isValid: {occurrence.isValid}")
+            else:
+                futil.log("No occurrence selected.")
+        else:
+            occurrence = None
+            triadInput.setRotateVisibility(False)
+
+    elif changed_input.id == 'triadInput':
+        futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
+        futil.log(f'selection count triad: {selectionInput.selectionCount}')
+        futil.log(f'{occurrence.isValid}')
+
+        triadTransform = triadInput.transform
+        occurrence.transform2 = triadTransform
 
     # General logging for debug.
     futil.log(
