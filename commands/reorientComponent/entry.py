@@ -111,9 +111,9 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     futil.add_handler(
         args.command.inputChanged, command_input_changed, local_handlers=local_handlers
     )
-    # futil.add_handler(
-    #     args.command.executePreview, command_preview, local_handlers=local_handlers
-    # )
+    futil.add_handler(
+        args.command.executePreview, command_preview, local_handlers=local_handlers
+    )
     futil.add_handler(
         args.command.validateInputs,
         command_validate_input,
@@ -133,14 +133,65 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     # TODO ******************************** Your code here ********************************
 
+occurrence_original_transform = None
+last_selected_occurrence = None
+
 # This event handler is called when the command needs to compute a new preview in the graphics window.
 def command_preview(args: adsk.core.CommandEventArgs):
     # General logging for debug.
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
-occurrence_original_transform = None
-last_selected_occurrence = None
+    try:
+        global occurrence_original_transform, last_selected_occurrence, rootComp
+        inputs = args.command.commandInputs
+        
+        selectionComponentInput = inputs.itemById('selectionComponentInput')
+        selectionFaceInput = inputs.itemById('selectionFaceInput')
+        
+        # Revert the previous transform if there was one
+        if last_selected_occurrence and occurrence_original_transform:
+            last_selected_occurrence.transform2 = occurrence_original_transform
+            occurrence_original_transform = None
+            last_selected_occurrence = None
+
+        # Check if a component is selected and apply the new transform
+        if selectionComponentInput.selectionCount > 0:
+            occurrence = adsk.fusion.Occurrence.cast(selectionComponentInput.selection(0).entity)
+            occurrence_original_transform = occurrence.transform2.copy()
+            last_selected_occurrence = occurrence
+            
+            # Apply the new transformation (e.g., identity matrix)
+            identity_matrix = adsk.core.Matrix3D.create()
+            occurrence.transform2 = identity_matrix
+        
+        # Check if a face is selected and apply the new transform
+        elif selectionFaceInput.selectionCount > 0:
+            selected_face = selectionFaceInput.selection(0).entity
+
+            if selected_face.objectType == adsk.fusion.BRepFace.classType():
+                # Get the occurrence containing the selected face
+                face_body = selected_face.body
+                face_component = face_body.parentComponent
+                
+                # Find the occurrence from the component
+                occurrences = rootComp.allOccurrencesByComponent(face_component)
+                if occurrences.count > 0:
+                    occurrence = adsk.fusion.Occurrence.cast(occurrences.item(0))
+                    
+                    # Revert the previous transform if a new face is being selected
+                    if last_selected_occurrence and occurrence_original_transform:
+                        last_selected_occurrence.transform2 = occurrence_original_transform
+
+                    occurrence_original_transform = occurrence.transform2.copy()
+                    last_selected_occurrence = occurrence
+
+                    # Apply the new transformation
+                    identity_matrix = adsk.core.Matrix3D.create()
+                    occurrence.transform2 = identity_matrix
+
+    except:
+        futil.log(f'Preview Handler Failed:\n{traceback.format_exc()}')
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
@@ -154,64 +205,67 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     selectionFaceInput = inputs.itemById("selectionFaceInput")
     triadInput = inputs.itemById("triadInput")
 
+    # 1. First, check if both selection inputs are empty. If so, revert the transform.
+    # if selectionComponentInput.selectionCount == 0 and selectionFaceInput.selectionCount == 0:
+    #     if last_selected_occurrence and occurrence_original_transform:
+    #         last_selected_occurrence.transform2 = occurrence_original_transform
+    #         occurrence_original_transform = None
+    #         last_selected_occurrence = None
+    #     return # Exit the handler early
+
+    # 3. Check if a face was just selected.
     if changed_input.id == 'selectionFaceInput':
-        if selectionFaceInput.selectionCount > 0:
-            selectedFace = selectionFaceInput.selection(0).entity
-            body = selectedFace.body
-            component = body.parentComponent
-            occurrenceList = rootComp.allOccurrencesByComponent(component)
-            occurrence = occurrenceList.itemByName(f'{component.name}:1')
+        pass
+        # if selectionFaceInput.selectionCount > 0:
+        #     selected_face = selectionFaceInput.selection(0).entity
+            
+        #     if selected_face.objectType == adsk.fusion.BRepFace.classType():
+        #         # Get the occurrence containing the selected face
+        #         face_body = selected_face.body
+        #         face_component = face_body.parentComponent
+        #         rootComp = adsk.fusion.Design.cast(adsk.core.Application.get().activeProduct).rootComponent
+                
+        #         # Find the occurrence from the component
+        #         occurrences = rootComp.allOccurrencesByComponent(face_component)
+        #         if occurrences.count > 0:
+        #             occurrence = adsk.fusion.Occurrence.cast(occurrences.item(0))
+                    
+        #             # Revert the previous transform if a new face is being selected
+        #             if last_selected_occurrence and occurrence_original_transform:
+        #                 last_selected_occurrence.transform2 = occurrence_original_transform
 
-            if selectionComponentInput.selectionCount == 0:
-                selectionComponentInput.addSelection(occurrence)
+        #             occurrence_original_transform = occurrence.transform2.copy()
+        #             last_selected_occurrence = occurrence
 
-                occurrence = selectionComponentInput.selection(0).entity
-                occurrence_original_transform = occurrence.transform2.copy()
-                last_selected_occurrence = occurrence
+        #             # Apply the new transformation
+        #             identity_matrix = adsk.core.Matrix3D.create()
+        #             occurrence.transform2 = identity_matrix
 
-                futil.log(f'original transform >>> {[round(e, 6) for e in occurrence_original_transform.asArray()]}')
-
-            else:
-                futil.log('Occurrence has been selected')
-
-            target_origin = adsk.core.Point3D.create(0, 0, 0)       # Point3D
-            target_normal = adsk.core.Vector3D.create(0, 0, -1)     # Vector3D
-            face_centroid = selectedFace.centroid                   # Point3D
-            face_evaluator = selectedFace.evaluator
-            (returnValue, face_normal) = face_evaluator.getNormalAtPoint(face_centroid)
-
-            futil.log(f'Evaluator >>> returned value: {returnValue} | normal vector: {[round(e, 6) for e in face_normal.asArray()]}')
-        
-            identity_matrix = adsk.core.Matrix3D.create()
-            occurrence.transform2 = identity_matrix
-            selectionComponentInput.addSelection(occurrence)
-        else:
-            futil.log('No selection')
-            identity_matrix = adsk.core.Matrix3D.create()
-            last_selected_occurrence.transform2 = identity_matrix
-            selectionComponentInput.addSelection(occurrence)
-            selectionFaceInput.addSelection(selectedFace)
-
+    # 2. Check if a component was just selected.
     elif changed_input.id == 'selectionComponentInput':
-        if selectionComponentInput.selectionCount > 0:
-            occurrence = selectionComponentInput.selection(0).entity
-            occurrence_original_transform = occurrence.transform2.copy()
-            last_selected_occurrence = occurrence
+        pass
+        # if selectionComponentInput.selectionCount > 0:
+        #     occurrence = adsk.fusion.Occurrence.cast(selectionComponentInput.selection(0).entity)
+            
+        #     # Revert the previous transform if a new component is being selected
+        #     if last_selected_occurrence and occurrence_original_transform:
+        #         last_selected_occurrence.transform2 = occurrence_original_transform
 
-            futil.log(f'original transform >>> {[round(e, 6) for e in occurrence_original_transform.asArray()]}')
+        #     occurrence_original_transform = occurrence.transform2.copy()
+        #     last_selected_occurrence = occurrence
+            
+        #     # Apply the new transformation
+        #     identity_matrix = adsk.core.Matrix3D.create()
+        #     occurrence.transform2 = identity_matrix
 
-            identity_matrix = adsk.core.Matrix3D.create()
-            occurrence.transform2 = identity_matrix
+        # else:
+        #     futil.log('Component is not selected')
+        #     if last_selected_occurrence and occurrence_original_transform:
+        #         last_selected_occurrence.transform2 = occurrence_original_transform
 
-            selectionComponentInput.addSelection(occurrence)
-        else:
-            futil.log('Component is not selected')
-            if last_selected_occurrence and occurrence_original_transform:
-                last_selected_occurrence.transform2 = occurrence_original_transform
-
-                # clear the global variables
-                occurrence_original_transform = None
-                last_selected_occurrence = None
+        #         # clear the global variables
+        #         occurrence_original_transform = None
+        #         last_selected_occurrence = None
 
     elif changed_input.id == 'triadInput':
         # futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
