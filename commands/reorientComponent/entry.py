@@ -8,6 +8,11 @@ import traceback
 app = adsk.core.Application.get()
 ui = app.userInterface
 
+# Get the active design
+product = app.activeProduct
+design = adsk.fusion.Design.cast(product)
+rootComp = design.rootComponent
+
 
 # TODO *** Specify the command identity information. ***
 CMD_ID = f"{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdDialog"
@@ -31,7 +36,6 @@ ICON_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "resource
 # Local list of event handlers used to maintain a reference so
 # they are not released and garbage collected.
 local_handlers = []
-
 
 # Executed when add-in is run.
 def start():
@@ -83,19 +87,22 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     # https://help.autodesk.com/view/fusion360/ENU/?contextId=CommandInputs
     inputs = args.command.commandInputs
 
-    selectionInput = inputs.addSelectionInput(
-        "selectionInput", "Select Component", "Select Component"
+    # TODO Define the dialog for your command by adding different inputs to the command.
+
+    selectionComponentInput = inputs.addSelectionInput("selectionComponentInput", "Select Component", "Select Component")
+    selectionComponentInput.addSelectionFilter("Occurrences")
+    selectionComponentInput.setSelectionLimits(1, 1)
+
+    selectionFaceInput = inputs.addSelectionInput(
+        "selectionFaceInput", "Select Face", "Select Face"
     )
-    selectionInput.addSelectionFilter("Occurrences")
-    selectionInput.setSelectionLimits(1, 1)
+    selectionFaceInput.addSelectionFilter("PlanarFaces")
+    selectionFaceInput.setSelectionLimits(1, 1)
 
     originMatrix = adsk.core.Matrix3D.create()
     triadInput = inputs.addTriadCommandInput("triadInput", originMatrix)
     triadInput.hideAll()
 
-    futil.log(f"initial triad transform: {triadInput.transform.asArray()}")
-
-    # TODO Define the dialog for your command by adding different inputs to the command.
 
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(
@@ -104,9 +111,9 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     futil.add_handler(
         args.command.inputChanged, command_input_changed, local_handlers=local_handlers
     )
-    futil.add_handler(
-        args.command.executePreview, command_preview, local_handlers=local_handlers
-    )
+    # futil.add_handler(
+    #     args.command.executePreview, command_preview, local_handlers=local_handlers
+    # )
     futil.add_handler(
         args.command.validateInputs,
         command_validate_input,
@@ -126,29 +133,14 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     # TODO ******************************** Your code here ********************************
 
-    selectionInput = inputs.itemById("selectionInput")
-    triadInput = inputs.itemById("triadInput")
-
-    occurrence = selectionInput.selection(0).entity
-
-    futil.log(f"triad output: {triadInput.transform.asArray()}")
-
-    newTransform = occurrence.transform2.copy()
-    newTransform.transformBy(triadInput.transform)
-
-    objTransformA = occurrence.transform2.asArray()
-    # Round each value in objTransformA to the nearest ten-thousandth
-    objTransformA_rounded = [round(val, 4) for val in objTransformA]
-
-    futil.log(f"object's transform after: {objTransformA_rounded}")
-
-
 # This event handler is called when the command needs to compute a new preview in the graphics window.
 def command_preview(args: adsk.core.CommandEventArgs):
     # General logging for debug.
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
+occurrence_original_transform = None
+last_selected_occurrence = None
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
@@ -156,61 +148,74 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
     inputs = args.inputs
 
-    selectionInput = inputs.itemById("selectionInput")
+    global occurrence_original_transform, last_selected_occurrence
+
+    selectionComponentInput = inputs.itemById("selectionComponentInput")
+    selectionFaceInput = inputs.itemById("selectionFaceInput")
     triadInput = inputs.itemById("triadInput")
 
-    global occurrence
+    if changed_input.id == 'selectionFaceInput':
+        if selectionFaceInput.selectionCount > 0:
+            selectedFace = selectionFaceInput.selection(0).entity
+            body = selectedFace.body
+            component = body.parentComponent
+            occurrenceList = rootComp.allOccurrencesByComponent(component)
+            occurrence = occurrenceList.itemByName(f'{component.name}:1')
 
-    if changed_input.id == 'selectionInput':
-        futil.log(f'selection count before: {selectionInput.selectionCount}')
-        
-        if selectionInput.selectionCount > 0:
-            occurrence = selectionInput.selection(0).entity
+            if selectionComponentInput.selectionCount == 0:
+                selectionComponentInput.addSelection(occurrence)
 
-            try:
-                boundingBox = occurrence.boundingBox
-                globalObjMin = boundingBox.minPoint
-                globalObjMax = boundingBox.maxPoint
-                globalObjCenterPoint = adsk.core.Point3D.create()
-                globalObjCenterPoint.setWithArray([(globalObjMax.x + globalObjMin.x) / 2, (globalObjMax.y + globalObjMin.y) / 2, (globalObjMax.z + globalObjMin.z) / 2])
+                occurrence = selectionComponentInput.selection(0).entity
+                occurrence_original_transform = occurrence.transform2.copy()
+                last_selected_occurrence = occurrence
 
-                futil.log(f'Global center: {globalObjCenterPoint.asArray()}')
+                futil.log(f'original transform >>> {[round(e, 6) for e in occurrence_original_transform.asArray()]}')
 
-                objCenterTransform = adsk.core.Matrix3D.create()
-                objCenterTransform.translation = globalObjCenterPoint.asVector()
-
-                triadInput.setRotateVisibility(True)
-                # # triadInput.setTranslateVisibility(True)
-                # # triadInput.transform = objCenterTransform
-
-                objTransformToGlobalCenter = adsk.core.Matrix3D.create()
-                objTransformToGlobalCenter.translation = globalObjCenterPoint.asVector()
-                objTransformToGlobalCenter.invert()
-
-                originalTransform = occurrence.transform2
-                originalTransform.transformBy(objTransformToGlobalCenter)
-                occurrence.transform2 = originalTransform
-
-                futil.log(f'selection count: {selectionInput.selectionCount}')
-
-            except:
-                futil.log("ERROR:\n{}".format(traceback.format_exc()))
-
-            if occurrence:
-                futil.log(f"occurrence.isValid: {occurrence.isValid}")
             else:
-                futil.log("No occurrence selected.")
+                futil.log('Occurrence has been selected')
+
+            target_origin = adsk.core.Point3D.create(0, 0, 0)       # Point3D
+            target_normal = adsk.core.Vector3D.create(0, 0, -1)     # Vector3D
+            face_centroid = selectedFace.centroid                   # Point3D
+            face_evaluator = selectedFace.evaluator
+            (returnValue, face_normal) = face_evaluator.getNormalAtPoint(face_centroid)
+
+            futil.log(f'Evaluator >>> returned value: {returnValue} | normal vector: {[round(e, 6) for e in face_normal.asArray()]}')
+        
+            identity_matrix = adsk.core.Matrix3D.create()
+            occurrence.transform2 = identity_matrix
+            selectionComponentInput.addSelection(occurrence)
         else:
-            occurrence = None
-            triadInput.setRotateVisibility(False)
+            futil.log('No selection')
+            identity_matrix = adsk.core.Matrix3D.create()
+            last_selected_occurrence.transform2 = identity_matrix
+            selectionComponentInput.addSelection(occurrence)
+            selectionFaceInput.addSelection(selectedFace)
+
+    elif changed_input.id == 'selectionComponentInput':
+        if selectionComponentInput.selectionCount > 0:
+            occurrence = selectionComponentInput.selection(0).entity
+            occurrence_original_transform = occurrence.transform2.copy()
+            last_selected_occurrence = occurrence
+
+            futil.log(f'original transform >>> {[round(e, 6) for e in occurrence_original_transform.asArray()]}')
+
+            identity_matrix = adsk.core.Matrix3D.create()
+            occurrence.transform2 = identity_matrix
+
+            selectionComponentInput.addSelection(occurrence)
+        else:
+            futil.log('Component is not selected')
+            if last_selected_occurrence and occurrence_original_transform:
+                last_selected_occurrence.transform2 = occurrence_original_transform
+
+                # clear the global variables
+                occurrence_original_transform = None
+                last_selected_occurrence = None
 
     elif changed_input.id == 'triadInput':
-        futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
-        futil.log(f'selection count triad: {selectionInput.selectionCount}')
-        futil.log(f'{occurrence.isValid}')
-
-        triadTransform = triadInput.transform
-        occurrence.transform2 = triadTransform
+        # futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
+        pass
 
     # General logging for debug.
     futil.log(
