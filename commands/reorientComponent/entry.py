@@ -199,7 +199,7 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
     inputs = args.inputs
 
-    global occurrence_original_transform, last_selected_occurrence
+    # global occurrence_original_transform, last_selected_occurrence
 
     selectionComponentInput = inputs.itemById("selectionComponentInput")
     selectionFaceInput = inputs.itemById("selectionFaceInput")
@@ -214,8 +214,8 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     #     return # Exit the handler early
 
     # 3. Check if a face was just selected.
-    if changed_input.id == 'selectionFaceInput':
-        pass
+    # if changed_input.id == 'selectionFaceInput':
+        # pass
         # if selectionFaceInput.selectionCount > 0:
         #     selected_face = selectionFaceInput.selection(0).entity
             
@@ -242,8 +242,8 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
         #             occurrence.transform2 = identity_matrix
 
     # 2. Check if a component was just selected.
-    elif changed_input.id == 'selectionComponentInput':
-        pass
+    # elif changed_input.id == 'selectionComponentInput':
+    #     pass
         # if selectionComponentInput.selectionCount > 0:
         #     occurrence = adsk.fusion.Occurrence.cast(selectionComponentInput.selection(0).entity)
             
@@ -267,9 +267,9 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
         #         occurrence_original_transform = None
         #         last_selected_occurrence = None
 
-    elif changed_input.id == 'triadInput':
+    # elif changed_input.id == 'triadInput':
         # futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
-        pass
+        # pass
 
     # General logging for debug.
     futil.log(
