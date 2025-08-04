@@ -89,19 +89,9 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
     # TODO Define the dialog for your command by adding different inputs to the command.
 
-    selectionComponentInput = inputs.addSelectionInput("selectionComponentInput", "Select Component", "Select Component")
-    selectionComponentInput.addSelectionFilter("Occurrences")
-    selectionComponentInput.setSelectionLimits(1, 1)
-
     selectionFaceInput = inputs.addSelectionInput(
         "selectionFaceInput", "Select Face", "Select Face"
     )
-    selectionFaceInput.addSelectionFilter("PlanarFaces")
-    selectionFaceInput.setSelectionLimits(1, 1)
-
-    originMatrix = adsk.core.Matrix3D.create()
-    triadInput = inputs.addTriadCommandInput("triadInput", originMatrix)
-    triadInput.hideAll()
 
 
     # TODO Connect to the events that are needed by this command.
@@ -142,155 +132,24 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
-    try:
-        global occurrence_original_transform, last_selected_occurrence, rootComp
-        inputs = args.command.commandInputs
-        
-        selectionComponentInput = inputs.itemById('selectionComponentInput')
-        selectionFaceInput = inputs.itemById('selectionFaceInput')
-        
-        # Revert the previous transform if there was one
-        if last_selected_occurrence and occurrence_original_transform:
-            last_selected_occurrence.transform2 = occurrence_original_transform
-            occurrence_original_transform = None
-            last_selected_occurrence = None
-
-        # Check if a component is selected and apply the new transform
-        if selectionComponentInput.selectionCount > 0:
-            occurrence = adsk.fusion.Occurrence.cast(selectionComponentInput.selection(0).entity)
-            occurrence_original_transform = occurrence.transform2.copy()
-            last_selected_occurrence = occurrence
-            
-            # Apply the new transformation (e.g., identity matrix)
-            identity_matrix = adsk.core.Matrix3D.create()
-            occurrence.transform2 = identity_matrix
-        
-        # Check if a face is selected and apply the new transform
-        elif selectionFaceInput.selectionCount > 0:
-            selected_face = selectionFaceInput.selection(0).entity
-
-            if selected_face.objectType == adsk.fusion.BRepFace.classType():
-                # Get the occurrence containing the selected face
-                face_body = selected_face.body
-                face_component = face_body.parentComponent
-                
-                # Find the occurrence from the component
-                occurrences = rootComp.allOccurrencesByComponent(face_component)
-                if occurrences.count > 0:
-                    occurrence = adsk.fusion.Occurrence.cast(occurrences.item(0))
-                    
-                    # Revert the previous transform if a new face is being selected
-                    if last_selected_occurrence and occurrence_original_transform:
-                        last_selected_occurrence.transform2 = occurrence_original_transform
-
-                    occurrence_original_transform = occurrence.transform2.copy()
-                    last_selected_occurrence = occurrence
-
-                    # Apply the new transformation
-                    identity_matrix = adsk.core.Matrix3D.create()
-                    occurrence.transform2 = identity_matrix
-
-    except:
-        futil.log(f'Preview Handler Failed:\n{traceback.format_exc()}')
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
-    changed_input = args.input
-    inputs = args.inputs
-
-    # global occurrence_original_transform, last_selected_occurrence
-
-    selectionComponentInput = inputs.itemById("selectionComponentInput")
-    selectionFaceInput = inputs.itemById("selectionFaceInput")
-    triadInput = inputs.itemById("triadInput")
-
-    # 1. First, check if both selection inputs are empty. If so, revert the transform.
-    # if selectionComponentInput.selectionCount == 0 and selectionFaceInput.selectionCount == 0:
-    #     if last_selected_occurrence and occurrence_original_transform:
-    #         last_selected_occurrence.transform2 = occurrence_original_transform
-    #         occurrence_original_transform = None
-    #         last_selected_occurrence = None
-    #     return # Exit the handler early
-
-    # 3. Check if a face was just selected.
-    # if changed_input.id == 'selectionFaceInput':
-        # pass
-        # if selectionFaceInput.selectionCount > 0:
-        #     selected_face = selectionFaceInput.selection(0).entity
-            
-        #     if selected_face.objectType == adsk.fusion.BRepFace.classType():
-        #         # Get the occurrence containing the selected face
-        #         face_body = selected_face.body
-        #         face_component = face_body.parentComponent
-        #         rootComp = adsk.fusion.Design.cast(adsk.core.Application.get().activeProduct).rootComponent
-                
-        #         # Find the occurrence from the component
-        #         occurrences = rootComp.allOccurrencesByComponent(face_component)
-        #         if occurrences.count > 0:
-        #             occurrence = adsk.fusion.Occurrence.cast(occurrences.item(0))
-                    
-        #             # Revert the previous transform if a new face is being selected
-        #             if last_selected_occurrence and occurrence_original_transform:
-        #                 last_selected_occurrence.transform2 = occurrence_original_transform
-
-        #             occurrence_original_transform = occurrence.transform2.copy()
-        #             last_selected_occurrence = occurrence
-
-        #             # Apply the new transformation
-        #             identity_matrix = adsk.core.Matrix3D.create()
-        #             occurrence.transform2 = identity_matrix
-
-    # 2. Check if a component was just selected.
-    # elif changed_input.id == 'selectionComponentInput':
-    #     pass
-        # if selectionComponentInput.selectionCount > 0:
-        #     occurrence = adsk.fusion.Occurrence.cast(selectionComponentInput.selection(0).entity)
-            
-        #     # Revert the previous transform if a new component is being selected
-        #     if last_selected_occurrence and occurrence_original_transform:
-        #         last_selected_occurrence.transform2 = occurrence_original_transform
-
-        #     occurrence_original_transform = occurrence.transform2.copy()
-        #     last_selected_occurrence = occurrence
-            
-        #     # Apply the new transformation
-        #     identity_matrix = adsk.core.Matrix3D.create()
-        #     occurrence.transform2 = identity_matrix
-
-        # else:
-        #     futil.log('Component is not selected')
-        #     if last_selected_occurrence and occurrence_original_transform:
-        #         last_selected_occurrence.transform2 = occurrence_original_transform
-
-        #         # clear the global variables
-        #         occurrence_original_transform = None
-        #         last_selected_occurrence = None
-
-    # elif changed_input.id == 'triadInput':
-        # futil.log(f'current triad transform: {[round(e, 6) for e in triadInput.transform.asArray()]}')
-        # pass
-
     # General logging for debug.
     futil.log(
         f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}"
     )
-
+    changed_input = args.input
+    inputs = args.inputs
 
 # This event handler is called when the user interacts with any of the inputs in the dialog
 # which allows you to verify that all of the inputs are valid and enables the OK button.
 def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
     # General logging for debug.
-    # futil.log(f"{CMD_NAME} Validate Input Event")
+    futil.log(f"{CMD_NAME} Validate Input Event")
 
     inputs = args.inputs
-
-    # Verify the validity of the input values. This controls if the OK button is enabled or not.
-    # valueInput = inputs.itemById("value_input")
-    # if valueInput.value >= 0:
-    #     args.areInputsValid = True
-    # else:
-    #     args.areInputsValid = False
 
 
 def command_destroy(args: adsk.core.CommandEventArgs):
