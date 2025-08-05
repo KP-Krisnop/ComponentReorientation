@@ -1,4 +1,5 @@
 import adsk.core
+import adsk.fusion
 import os
 import math
 from ...lib import fusionAddInUtils as futil
@@ -11,8 +12,12 @@ ui = app.userInterface
 # Get the active design
 product = app.activeProduct
 design = adsk.fusion.Design.cast(product)
-rootComp = design.rootComponent
+root_comp = design.rootComponent
+features = root_comp.features
 
+# global variables *********************************************
+body_transform_matrix = adsk.core.Matrix3D.create()
+selected_body = None
 
 # TODO *** Specify the command identity information. ***
 CMD_ID = f"{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdDialog"
@@ -89,10 +94,14 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 
     # TODO Define the dialog for your command by adding different inputs to the command.
 
-    selectionFaceInput = inputs.addSelectionInput(
-        "selectionFaceInput", "Select Face", "Select Face"
-    )
+    # selection input for selecting planar face
+    select_face_input = inputs.addSelectionInput("selectFaceInput", "Select Face", "Select Face")
+    select_face_input.addSelectionFilter("PlanarFaces")
+    select_face_input.setSelectionLimits(1, 1)
 
+    initial_matrix = adsk.core.Matrix3D.create()
+    triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
+    triad_input.hideAll()
 
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(
@@ -119,12 +128,28 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
 def command_execute(args: adsk.core.CommandEventArgs):
     # General logging for debug.
     futil.log(f"{CMD_NAME} Command Execute Event")
+
     inputs = args.command.commandInputs
+
+    global selected_body
 
     # TODO ******************************** Your code here ********************************
 
-occurrence_original_transform = None
-last_selected_occurrence = None
+    # Find the occurrence that contains the selected_body
+    selected_occurrence = None
+    for occ in root_comp.allOccurrences:
+        for body in occ.bRepBodies:
+            if body == selected_body:
+                selected_occurrence = occ
+                break
+        if selected_occurrence:
+            break
+
+    if selected_occurrence:
+        futil.log(f'selected occurrence transform >>> {selected_occurrence.name}')
+    else:
+        futil.log(f'no selected occurrence')
+
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
 def command_preview(args: adsk.core.CommandEventArgs):
@@ -132,16 +157,111 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
+    # Grabing inputs **********************************************************************
+
+    select_face_input = inputs.itemById('selectFaceInput')
+    triad_input = inputs.itemById('triadInput')
+
+    select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
+    triad_input = adsk.core.TriadCommandInput.cast(triad_input)
+
+    global body_transform_matrix, selected_body
+
+    # TODO ******************************** Your code here ********************************
+
+    count = select_face_input.selectionCount
+    if count:
+        face = select_face_input.selection(0).entity
+        face = adsk.fusion.BRepFace.cast(face)
+        
+        face_evaluator = face.evaluator
+        face_center = face.centroid
+        (returnValue, face_normal) = face_evaluator.getNormalAtPoint(face_center)
+
+        face_center = adsk.core.Point3D.cast(face_center)
+        face_normal = adsk.core.Vector3D.cast(face_normal)
+
+        body = face.body
+        body_collection = adsk.core.ObjectCollection.create()
+        body_collection.add(body)
+        selected_body = body
+
+        target_origin = adsk.core.Point3D.create(0, 0 ,0)
+        target_normal = adsk.core.Vector3D.create(0, 0, -1)
+        
+        identity_matrix = adsk.core.Matrix3D.create()
+        transform_matrix = adsk.core.Matrix3D.create()
+
+        # Step 1: Translate the face's point to the target origin
+        translation_vector = face_center.vectorTo(target_origin)
+        transform_matrix.translation = translation_vector
+
+        # Step 2: Rotate the face's normal to align with the target normal
+        # Calculate the axis of rotation (cross product of current normal and target normal)
+        rotation_axis = face_normal.crossProduct(target_normal)
+        rotation_axis.normalize()  # Ensure it's a unit vector
+
+        # Create a rotation matrix and combine with the translation
+        # Note: This is a simplified rotation. For complex alignments,
+        # you might need to consider multiple rotations or a more robust alignment algorithm.
+        # For a planar face, aligning its normal and then translating its point usually works.
+        rotation_matrix = adsk.core.Matrix3D.create()
+        rotation_matrix.setToRotateTo(face_normal, target_normal)
+
+        triad_rotation_matrix = triad_input.transform.copy()
+
+        # Combine translation and rotation (order matters: rotate then translate)
+        transform_matrix.transformBy(rotation_matrix)
+        transform_matrix.transformBy(triad_rotation_matrix)
+
+        body_transform_matrix = transform_matrix
+
+        # check if there is transformation and move if not
+        if not transform_matrix.isEqualTo(identity_matrix):
+            moveFeats = features.moveFeatures
+            moveFeatureInput = moveFeats.createInput2(body_collection)
+            moveFeatureInput.defineAsFreeMove(transform_matrix)
+            moveFeats.add(moveFeatureInput)
+
+    else:
+        futil.log(f'not selected')
+        body_transform_matrix = adsk.core.Matrix3D.create()
+        selected_body = None
+
+    
+    body_array = body_transform_matrix.asArray()
+    log_array = [f"{x:.3f}" for x in body_array]
+    futil.log(f'transform ==========================')
+    for i in range(0, 16, 4):
+        futil.log(f'{log_array[i]}\t{log_array[i+1]}\t{log_array[i+2]}\t{log_array[i+3]}')
+    futil.log(f'====================================')
+    
+    # This makes the preview the final result
+    # args.isValidResult = True
+
 
 # This event handler is called when the user changes anything in the command dialog
 # allowing you to modify values of other inputs based on that change.
 def command_input_changed(args: adsk.core.InputChangedEventArgs):
-    # General logging for debug.
-    futil.log(
-        f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}"
-    )
     changed_input = args.input
     inputs = args.inputs
+
+    # General logging for debug.
+    futil.log(f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}")
+
+    # Grabing inputs **********************************************************************
+
+    select_face_input = inputs.itemById('selectFaceInput')
+    triad_input = inputs.itemById('triadInput')
+
+    # TODO ******************************** Your code here ********************************
+    
+    if select_face_input.selectionCount:
+        if not triad_input.isZRotationVisible:
+            triad_input.isZRotationVisible = True
+    else:
+        triad_input.isZRotationVisible = False
+
 
 # This event handler is called when the user interacts with any of the inputs in the dialog
 # which allows you to verify that all of the inputs are valid and enables the OK button.
@@ -150,6 +270,8 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
     futil.log(f"{CMD_NAME} Validate Input Event")
 
     inputs = args.inputs
+
+    # TODO ******************************** Your code here ********************************
 
 
 def command_destroy(args: adsk.core.CommandEventArgs):
