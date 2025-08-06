@@ -17,6 +17,7 @@ features = root_comp.features
 
 # global variables *********************************************
 body_transform_matrix = adsk.core.Matrix3D.create()
+identity_matrix = adsk.core.Matrix3D.create()
 selected_body = None
 
 # TODO *** Specify the command identity information. ***
@@ -103,6 +104,8 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
     triad_input.hideAll()
 
+    inputs.addBoolValueInput('boolInput', 'Preview body transform', True , '', True)
+
     # TODO Connect to the events that are needed by this command.
     futil.add_handler(
         args.command.execute, command_execute, local_handlers=local_handlers
@@ -131,24 +134,47 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     inputs = args.command.commandInputs
 
-    global selected_body
+    global selected_body, body_transform_matrix
 
     # TODO ******************************** Your code here ********************************
 
-    # Find the occurrence that contains the selected_body
-    selected_occurrence = None
-    for occ in root_comp.allOccurrences:
-        for body in occ.bRepBodies:
-            if body == selected_body:
-                selected_occurrence = occ
-                break
-        if selected_occurrence:
-            break
+    # check if there is transformation
+    if not body_transform_matrix.isEqualTo(identity_matrix):
+        body_collection = adsk.core.ObjectCollection.create()
+        body_collection.add(selected_body)
 
-    if selected_occurrence:
-        futil.log(f'selected occurrence transform >>> {selected_occurrence.name}')
-    else:
-        futil.log(f'no selected occurrence')
+        moveFeats = features.moveFeatures
+        moveFeatureInput = moveFeats.createInput2(body_collection)
+        moveFeatureInput.defineAsFreeMove(body_transform_matrix)
+        moveFeats.add(moveFeatureInput)
+    
+    # get the inverse of body's transform
+    inverse_body_transform = body_transform_matrix.copy()
+    inverse_body_transform.invert()
+
+    # apply the inverse of body's transform to all occurrences referencing component
+    component = selected_body.parentComponent
+    occurrences = root_comp.allOccurrencesByComponent(component)
+
+    for i in range(occurrences.count):
+        occ = occurrences.item(i)
+        initial_occ_transform = occ.transform2.copy()
+
+        # initial_occ_rotation_transform = initial_occ_transform.copy()
+        # initial_occ_rotation_transform.translation = adsk.core.Vector3D.create(0, 0, 0)
+
+        # log_array = [f"{x:.3f}" for x in initial_occ_rotation_transform.asArray()]
+        # futil.log(f'transform rotate ===================')
+        # for i in range(0, 16, 4):
+        #     futil.log(f'{log_array[i]}\t{log_array[i+1]}\t{log_array[i+2]}\t{log_array[i+3]}')
+        # futil.log(f'====================================')
+
+        final_occ_transform = initial_occ_transform.copy()
+
+        # inverse_body_transform.transformBy(initial_occ_rotation_transform)
+        final_occ_transform.transformBy(inverse_body_transform)
+        
+        occ.transform2 = final_occ_transform
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
@@ -161,9 +187,11 @@ def command_preview(args: adsk.core.CommandEventArgs):
 
     select_face_input = inputs.itemById('selectFaceInput')
     triad_input = inputs.itemById('triadInput')
+    bool_input = inputs.itemById('boolInput')
 
     select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
     triad_input = adsk.core.TriadCommandInput.cast(triad_input)
+    bool_input = adsk.core.BoolValueCommandInput.cast(bool_input)
 
     global body_transform_matrix, selected_body
 
@@ -174,6 +202,21 @@ def command_preview(args: adsk.core.CommandEventArgs):
         face = select_face_input.selection(0).entity
         face = adsk.fusion.BRepFace.cast(face)
         
+        body = face.body
+        body_collection = adsk.core.ObjectCollection.create()
+        body_collection.add(body)
+        selected_body = body
+
+        # Find the occurrence that contains the selected_body
+        selected_occurrence = None
+        for occ in root_comp.allOccurrences:
+            for body in occ.bRepBodies:
+                if body == selected_body:
+                    selected_occurrence = occ
+                    break
+            if selected_occurrence:
+                break
+        
         face_evaluator = face.evaluator
         face_center = face.centroid
         (returnValue, face_normal) = face_evaluator.getNormalAtPoint(face_center)
@@ -181,25 +224,14 @@ def command_preview(args: adsk.core.CommandEventArgs):
         face_center = adsk.core.Point3D.cast(face_center)
         face_normal = adsk.core.Vector3D.cast(face_normal)
 
-        body = face.body
-        body_collection = adsk.core.ObjectCollection.create()
-        body_collection.add(body)
-        selected_body = body
-
-        target_origin = adsk.core.Point3D.create(0, 0 ,0)
+        target_origin = adsk.core.Point3D.create(0, 0, 0)
         target_normal = adsk.core.Vector3D.create(0, 0, -1)
-        
-        identity_matrix = adsk.core.Matrix3D.create()
+
         transform_matrix = adsk.core.Matrix3D.create()
 
-        # Step 1: Translate the face's point to the target origin
+        # Translate the face's point to the target origin
         translation_vector = face_center.vectorTo(target_origin)
         transform_matrix.translation = translation_vector
-
-        # Step 2: Rotate the face's normal to align with the target normal
-        # Calculate the axis of rotation (cross product of current normal and target normal)
-        rotation_axis = face_normal.crossProduct(target_normal)
-        rotation_axis.normalize()  # Ensure it's a unit vector
 
         # Create a rotation matrix and combine with the translation
         # Note: This is a simplified rotation. For complex alignments,
@@ -217,7 +249,7 @@ def command_preview(args: adsk.core.CommandEventArgs):
         body_transform_matrix = transform_matrix
 
         # check if there is transformation and move if not
-        if not transform_matrix.isEqualTo(identity_matrix):
+        if not transform_matrix.isEqualTo(identity_matrix) and bool_input.value:
             moveFeats = features.moveFeatures
             moveFeatureInput = moveFeats.createInput2(body_collection)
             moveFeatureInput.defineAsFreeMove(transform_matrix)
@@ -255,6 +287,9 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     triad_input = inputs.itemById('triadInput')
 
     # TODO ******************************** Your code here ********************************
+
+    select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
+    triad_input = adsk.core.TriadCommandInput.cast(triad_input)
     
     if select_face_input.selectionCount:
         if not triad_input.isZRotationVisible:
