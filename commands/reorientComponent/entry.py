@@ -156,11 +156,11 @@ def command_execute(args: adsk.core.CommandEventArgs):
         moveFeatureInput.defineAsFreeMove(body_transform_matrix)
         moveFeats.add(moveFeatureInput)
     
-    # get the inverse of body's transform
+    # get the inverse of body's transform (IBT)
     inverse_body_transform = body_transform_matrix.copy()
     inverse_body_transform.invert()
 
-    # Find the occurrence that contains the selected_body
+    # Find the occurrence that contains the selected_body (A)
     selected_occurrence = None
     for occ in root_comp.allOccurrences:
         for body in occ.bRepBodies:
@@ -170,34 +170,20 @@ def command_execute(args: adsk.core.CommandEventArgs):
         if selected_occurrence:
             break
     
-    initial_occ_transform = selected_occurrence.transform2.copy()
-    final_occ_transform = selected_occurrence.transform2.copy()
-    final_occ_transform.transformBy(inverse_body_transform)
+    init_occ_transform = selected_occurrence.transform2.copy()
+    inverse_init_occ_transform = init_occ_transform.copy()
+    inverse_init_occ_transform.invert()
 
-    (init_origin, init_x_axis, init_y_axis, init_z_axis) = initial_occ_transform.getAsCoordinateSystem()
-    (final_origin, final_x_axis, final_y_axis, final_z_axis) = final_occ_transform.getAsCoordinateSystem()
+    # find A's local transform of inverse_body_transform (T_a^-1 times IBT times T_a)
+    local_space_transform = selected_occurrence.transform2.copy()
+    local_space_transform.transformBy(inverse_body_transform)
+    local_space_transform.transformBy(inverse_init_occ_transform)
 
-    delta_origin_vector = init_origin.vectorTo(final_origin) # global vector
-
-    futil.log(f'init_x_axis: \t{[f"{x:.3f}" for x in init_x_axis.asArray()]}')
-    futil.log(f'init_y_axis: \t{[f"{x:.3f}" for x in init_y_axis.asArray()]}')
-    futil.log(f'init_z_axis: \t{[f"{x:.3f}" for x in init_z_axis.asArray()]}')
-    futil.log(f'final_x_axis: \t{[f"{x:.3f}" for x in final_x_axis.asArray()]}')
-    futil.log(f'final_y_axis: \t{[f"{x:.3f}" for x in final_y_axis.asArray()]}')
-    futil.log(f'final_z_axis: \t{[f"{x:.3f}" for x in final_z_axis.asArray()]}')
-    futil.log(f'delta_origin_vector: \t{[f"{x:.3f}" for x in delta_origin_vector.asArray()]}')
-
-    # Compute the dot product for each axis to map the global vector to the local system
-    x_local = delta_origin_vector.dotProduct(init_x_axis)
-    y_local = delta_origin_vector.dotProduct(init_y_axis)
-    z_local = delta_origin_vector.dotProduct(init_z_axis)
-
-    # Resulting vector in the local coordinate system
-    local_vector = adsk.core.Vector3D.create(x_local, y_local, z_local) # relative translation
-
-    delta_rotation_transform = adsk.core.Matrix3D.create()
-    delta_rotation_transform.setToAlignCoordinateSystems(init_origin, init_x_axis, init_y_axis, init_z_axis, final_origin, final_x_axis, final_y_axis, final_z_axis)
-    delta_rotation_transform.translation = adsk.core.Vector3D.create(0, 0, 0)
+    arr = [f"{x:.3f}" for x in local_space_transform.asArray()]
+    futil.log(f'local_space_transform ==============')
+    for i in range(0, 16, 4):
+        futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
+    futil.log(f'====================================')
 
     # apply the inverse of body's transform to all occurrences referencing component
     component = selected_body.parentComponent
@@ -205,40 +191,13 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     for i in range(occurrences.count):
         occ = occurrences.item(i)
-
         occ_transform = occ.transform2.copy()
-        inverse_occ_transform = occ_transform.copy()
-        inverse_occ_transform.invert()
 
-        transform_matrix = adsk.core.Matrix3D.create()
+        lst = local_space_transform.copy()
+        lst.transformBy(occ_transform)
 
-        dov = delta_origin_vector.copy()
-        dov.transformBy(occ_transform)
-        dov.transformBy(inverse_body_transform)
-        dov.transformBy(inverse_occ_transform)
-
-        transform_matrix.translation = dov
-        
-        # # make rotation matrix that has no translation
-        # occ_rotation = occ_transform.copy()
-        # occ_rotation.translation = adsk.core.Vector3D.create(0, 0, 0)
-
-        # translation_vector = local_vector.copy()
-        # translation_vector.transformBy(occ_rotation)
-
-        # drt = delta_rotation_transform.copy()
-        # drt.transformBy(transform_matrix)
-        # transform_matrix = adsk.core.Matrix3D.cast(drt)
-        # transform_matrix.translation = translation_vector
-        
-        arr = [f"{x:.3f}" for x in occ_transform.asArray()]
-        futil.log(f'transform_matrix ===================')
-        for i in range(0, 16, 4):
-            futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
-        futil.log(f'====================================')
-
-        occ_transform.transformBy(transform_matrix)
-        occ.transform2 = occ_transform
+        # occ_transform.transformBy(test_matrix)
+        occ.transform2 = lst
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
