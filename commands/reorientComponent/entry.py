@@ -10,10 +10,13 @@ app = adsk.core.Application.get()
 ui = app.userInterface
 
 # Get the active design
-product = app.activeProduct
-design = adsk.fusion.Design.cast(product)
-root_comp = design.rootComponent
-features = root_comp.features
+try:
+    product = app.activeProduct
+    design = adsk.fusion.Design.cast(product)
+    root_comp = design.rootComponent
+    features = root_comp.features
+except:
+    pass
 
 # global variables *********************************************
 body_transform_matrix = adsk.core.Matrix3D.create()
@@ -134,6 +137,11 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     inputs = args.command.commandInputs
 
+    product = app.activeProduct    
+    design = adsk.fusion.Design.cast(product)    
+    root_comp = design.rootComponent    
+    features = root_comp.features    
+    
     global selected_body, body_transform_matrix
 
     # TODO ******************************** Your code here ********************************
@@ -152,29 +160,75 @@ def command_execute(args: adsk.core.CommandEventArgs):
     inverse_body_transform = body_transform_matrix.copy()
     inverse_body_transform.invert()
 
+    # Find the occurrence that contains the selected_body
+    selected_occurrence = None
+    for occ in root_comp.allOccurrences:
+        for body in occ.bRepBodies:
+            if body == selected_body:
+                selected_occurrence = occ
+                break
+        if selected_occurrence:
+            break
+    
+    initial_occ_transform = selected_occurrence.transform2.copy()
+    final_occ_transform = selected_occurrence.transform2.copy()
+    final_occ_transform.transformBy(inverse_body_transform)
+
+    (init_origin, init_x_axis, init_y_axis, init_z_axis) = initial_occ_transform.getAsCoordinateSystem()
+    (final_origin, final_x_axis, final_y_axis, final_z_axis) = final_occ_transform.getAsCoordinateSystem()
+
+    delta_origin_vector = init_origin.vectorTo(final_origin) # global vector
+
+    futil.log(f'init_x_axis: \t{[f"{x:.3f}" for x in init_x_axis.asArray()]}')
+    futil.log(f'init_y_axis: \t{[f"{x:.3f}" for x in init_y_axis.asArray()]}')
+    futil.log(f'init_z_axis: \t{[f"{x:.3f}" for x in init_z_axis.asArray()]}')
+    futil.log(f'final_x_axis: \t{[f"{x:.3f}" for x in final_x_axis.asArray()]}')
+    futil.log(f'final_y_axis: \t{[f"{x:.3f}" for x in final_y_axis.asArray()]}')
+    futil.log(f'final_z_axis: \t{[f"{x:.3f}" for x in final_z_axis.asArray()]}')
+    futil.log(f'delta_origin_vector: \t{[f"{x:.3f}" for x in delta_origin_vector.asArray()]}')
+
+    # Compute the dot product for each axis to map the global vector to the local system
+    x_local = delta_origin_vector.dotProduct(init_x_axis)
+    y_local = delta_origin_vector.dotProduct(init_y_axis)
+    z_local = delta_origin_vector.dotProduct(init_z_axis)
+
+    # Resulting vector in the local coordinate system
+    local_vector = adsk.core.Vector3D.create(x_local, y_local, z_local) # relative translation
+
+    delta_rotation_transform = adsk.core.Matrix3D.create()
+    delta_rotation_transform.setToAlignCoordinateSystems(init_origin, init_x_axis, init_y_axis, init_z_axis, final_origin, final_x_axis, final_y_axis, final_z_axis)
+    delta_rotation_transform.translation = adsk.core.Vector3D.create(0, 0, 0)
+
     # apply the inverse of body's transform to all occurrences referencing component
     component = selected_body.parentComponent
     occurrences = root_comp.allOccurrencesByComponent(component)
 
     for i in range(occurrences.count):
         occ = occurrences.item(i)
-        initial_occ_transform = occ.transform2.copy()
 
-        # initial_occ_rotation_transform = initial_occ_transform.copy()
-        # initial_occ_rotation_transform.translation = adsk.core.Vector3D.create(0, 0, 0)
+        occ_transform = occ.transform2.copy()
 
-        # log_array = [f"{x:.3f}" for x in initial_occ_rotation_transform.asArray()]
-        # futil.log(f'transform rotate ===================')
-        # for i in range(0, 16, 4):
-        #     futil.log(f'{log_array[i]}\t{log_array[i+1]}\t{log_array[i+2]}\t{log_array[i+3]}')
-        # futil.log(f'====================================')
-
-        final_occ_transform = initial_occ_transform.copy()
-
-        # inverse_body_transform.transformBy(initial_occ_rotation_transform)
-        final_occ_transform.transformBy(inverse_body_transform)
+        transform_matrix = adsk.core.Matrix3D.create()
         
-        occ.transform2 = final_occ_transform
+        # make rotation matrix that has no translation
+        occ_rotation = occ_transform.copy()
+        occ_rotation.translation = adsk.core.Vector3D.create(0, 0, 0)
+
+        translation_vector = local_vector.copy()
+        translation_vector.transformBy(occ_rotation)
+
+
+        transform_matrix.transformBy(delta_rotation_transform)
+        transform_matrix.translation = translation_vector
+        
+        arr = [f"{x:.3f}" for x in transform_matrix.asArray()]
+        futil.log(f'transform_matrix ===================')
+        for i in range(0, 16, 4):
+            futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
+        futil.log(f'====================================')
+
+        occ_transform.transformBy(transform_matrix)
+        occ.transform2 = occ_transform
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
@@ -183,6 +237,11 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
+    product = app.activeProduct    
+    design = adsk.fusion.Design.cast(product)    
+    root_comp = design.rootComponent
+    features = root_comp.features    
+    
     # Grabing inputs **********************************************************************
 
     select_face_input = inputs.itemById('selectFaceInput')
