@@ -207,21 +207,31 @@ def command_execute(args: adsk.core.CommandEventArgs):
         occ = occurrences.item(i)
 
         occ_transform = occ.transform2.copy()
+        inverse_occ_transform = occ_transform.copy()
+        inverse_occ_transform.invert()
 
         transform_matrix = adsk.core.Matrix3D.create()
+
+        dov = delta_origin_vector.copy()
+        dov.transformBy(occ_transform)
+        dov.transformBy(inverse_body_transform)
+        dov.transformBy(inverse_occ_transform)
+
+        transform_matrix.translation = dov
         
-        # make rotation matrix that has no translation
-        occ_rotation = occ_transform.copy()
-        occ_rotation.translation = adsk.core.Vector3D.create(0, 0, 0)
+        # # make rotation matrix that has no translation
+        # occ_rotation = occ_transform.copy()
+        # occ_rotation.translation = adsk.core.Vector3D.create(0, 0, 0)
 
-        translation_vector = local_vector.copy()
-        translation_vector.transformBy(occ_rotation)
+        # translation_vector = local_vector.copy()
+        # translation_vector.transformBy(occ_rotation)
 
-
-        transform_matrix.transformBy(delta_rotation_transform)
-        transform_matrix.translation = translation_vector
+        # drt = delta_rotation_transform.copy()
+        # drt.transformBy(transform_matrix)
+        # transform_matrix = adsk.core.Matrix3D.cast(drt)
+        # transform_matrix.translation = translation_vector
         
-        arr = [f"{x:.3f}" for x in transform_matrix.asArray()]
+        arr = [f"{x:.3f}" for x in occ_transform.asArray()]
         futil.log(f'transform_matrix ===================')
         for i in range(0, 16, 4):
             futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
