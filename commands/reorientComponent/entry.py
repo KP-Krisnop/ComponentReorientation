@@ -20,7 +20,7 @@ except:
 
 # global variables *********************************************
 body_transform_matrix = adsk.core.Matrix3D.create()
-identity_matrix = adsk.core.Matrix3D.create()
+original_occ_transform = adsk.core.Matrix3D.create()
 selected_body = None
 
 # TODO *** Specify the command identity information. ***
@@ -146,20 +146,6 @@ def command_execute(args: adsk.core.CommandEventArgs):
 
     # TODO ******************************** Your code here ********************************
 
-    # check if there is transformation
-    if not body_transform_matrix.isEqualTo(identity_matrix):
-        body_collection = adsk.core.ObjectCollection.create()
-        body_collection.add(selected_body)
-
-        moveFeats = features.moveFeatures
-        moveFeatureInput = moveFeats.createInput2(body_collection)
-        moveFeatureInput.defineAsFreeMove(body_transform_matrix)
-        moveFeats.add(moveFeatureInput)
-    
-    # get the inverse of body's transform (IBT)
-    inverse_body_transform = body_transform_matrix.copy()
-    inverse_body_transform.invert()
-
     # Find the occurrence that contains the selected_body (A)
     selected_occurrence = None
     for occ in root_comp.allOccurrences:
@@ -170,20 +156,26 @@ def command_execute(args: adsk.core.CommandEventArgs):
         if selected_occurrence:
             break
     
-    init_occ_transform = selected_occurrence.transform2.copy()
-    inverse_init_occ_transform = init_occ_transform.copy()
-    inverse_init_occ_transform.invert()
+    occ_init_transform = selected_occurrence.transform2.copy()
+    inverse_occ_init_transform = occ_init_transform.copy()
+    inverse_occ_init_transform.invert()
 
-    # find A's local transform of inverse_body_transform (T_a^-1 times IBT times T_a)
-    local_space_transform = selected_occurrence.transform2.copy()
-    local_space_transform.transformBy(inverse_body_transform)
-    local_space_transform.transformBy(inverse_init_occ_transform)
+    selected_occurrence.transform2 = adsk.core.Matrix3D.create()
 
-    arr = [f"{x:.3f}" for x in local_space_transform.asArray()]
-    futil.log(f'local_space_transform ==============')
-    for i in range(0, 16, 4):
-        futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
-    futil.log(f'====================================')
+    # check if there is transformation
+    if not body_transform_matrix.isEqualTo(adsk.core.Matrix3D.create()):
+        body_collection = adsk.core.ObjectCollection.create()
+        body_collection.add(selected_body)
+        moveFeats = features.moveFeatures
+        moveFeatureInput = moveFeats.createInput2(body_collection)
+        moveFeatureInput.defineAsFreeMove(body_transform_matrix)
+        moveFeats.add(moveFeatureInput)
+
+    selected_occurrence.transform2 = occ_init_transform
+    
+    # get the inverse of body's transform (IBT)
+    inverse_body_transform = body_transform_matrix.copy()
+    inverse_body_transform.invert()
 
     # apply the inverse of body's transform to all occurrences referencing component
     component = selected_body.parentComponent
@@ -193,11 +185,11 @@ def command_execute(args: adsk.core.CommandEventArgs):
         occ = occurrences.item(i)
         occ_transform = occ.transform2.copy()
 
-        lst = local_space_transform.copy()
-        lst.transformBy(occ_transform)
+        # post-multiply. get local transformation in global form
+        transform = inverse_body_transform.copy()
+        transform.transformBy(occ_transform)
 
-        # occ_transform.transformBy(test_matrix)
-        occ.transform2 = lst
+        occ.transform2 = transform
 
 
 # This event handler is called when the command needs to compute a new preview in the graphics window.
@@ -241,6 +233,8 @@ def command_preview(args: adsk.core.CommandEventArgs):
             for body in occ.bRepBodies:
                 if body == selected_body:
                     selected_occurrence = occ
+                    selected_occurrence.transform2 = adsk.core.Matrix3D.create()
+                    original_occ_transform
                     break
             if selected_occurrence:
                 break
@@ -276,8 +270,14 @@ def command_preview(args: adsk.core.CommandEventArgs):
 
         body_transform_matrix = transform_matrix
 
+        arr = [f"{x:.3f}" for x in body_transform_matrix.asArray()]
+        futil.log(f'body_transform_matrix ==============')
+        for i in range(0, 16, 4):
+            futil.log(f'{arr[i]}\t{arr[i+1]}\t{arr[i+2]}\t{arr[i+3]}')
+        futil.log(f'====================================')
+
         # check if there is transformation and move if not
-        if not transform_matrix.isEqualTo(identity_matrix) and bool_input.value:
+        if not transform_matrix.isEqualTo(adsk.core.Matrix3D.create()) and bool_input.value:
             moveFeats = features.moveFeatures
             moveFeatureInput = moveFeats.createInput2(body_collection)
             moveFeatureInput.defineAsFreeMove(transform_matrix)
@@ -287,17 +287,6 @@ def command_preview(args: adsk.core.CommandEventArgs):
         futil.log(f'not selected')
         body_transform_matrix = adsk.core.Matrix3D.create()
         selected_body = None
-
-    
-    body_array = body_transform_matrix.asArray()
-    log_array = [f"{x:.3f}" for x in body_array]
-    futil.log(f'transform ==========================')
-    for i in range(0, 16, 4):
-        futil.log(f'{log_array[i]}\t{log_array[i+1]}\t{log_array[i+2]}\t{log_array[i+3]}')
-    futil.log(f'====================================')
-    
-    # This makes the preview the final result
-    # args.isValidResult = True
 
 
 # This event handler is called when the user changes anything in the command dialog
