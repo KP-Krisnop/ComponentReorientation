@@ -94,9 +94,14 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     select_face_input.addSelectionFilter("PlanarFaces")
     select_face_input.setSelectionLimits(1, 1)
 
-    initial_matrix = adsk.core.Matrix3D.create()
-    triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
-    triad_input.hideAll()
+    # initial_matrix = adsk.core.Matrix3D.create()
+    # triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
+    # triad_input.hideAll()
+
+    button_input = inputs.addBoolValueInput('buttonInput', 'Add Face', False, 'commands/reorientComponent/resources/add', False)
+
+    table_inputs = inputs.addTableCommandInput('tableInput', 'Faces', 1, '1')
+    table_inputs.addToolbarCommandInput(button_input)
 
     errorTextInput = inputs.addTextBoxCommandInput('errorTextInput', 'Log', '', 2, True)
     errorTextInput.isFullWidth = True
@@ -299,26 +304,39 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     # Grabing inputs **********************************************************************
 
     select_face_input = inputs.itemById('selectFaceInput')
-    triad_input = inputs.itemById('triadInput')
+    table_input = inputs.itemById('tableInput')
+    # triad_input = inputs.itemById('triadInput')
 
     # TODO ******************************** Your code here ********************************
 
     select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
-    triad_input = adsk.core.TriadCommandInput.cast(triad_input)
+    table_input = adsk.core.TableCommandInput.cast(table_input)
+    # triad_input = adsk.core.TriadCommandInput.cast(triad_input)
     
-    if select_face_input.selectionCount:
-        face = select_face_input.selection(0).entity
-        face = adsk.fusion.BRepFace.cast(face)
-        body = face.body
-        parent_component = body.parentComponent
-        
-        if parent_component == root_comp:
-            futil.log(f'Cannot move body. Body has no parent component')
+    if changed_input.id == 'selectFaceInput':
+        if select_face_input.selectionCount:
+            face = select_face_input.selection(0).entity
+            face = adsk.fusion.BRepFace.cast(face)
+            body = face.body
+            parent_component = body.parentComponent
+            
+            if parent_component == root_comp:
+                futil.log(f'Cannot move body. Body has no parent component')
+            else:              
+                initial_matrix = adsk.core.Matrix3D.create()
+                triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
+                triad_input.hideAll()
+
+                row_num = table_input.rowCount
+                futil.log(f'row_num >>> {row_num}')
+                table_input.addCommandInput(triad_input, row_num, 0)
+
+                futil.log(f'{triad_input.isZRotationVisible}')
+
+                if not triad_input.isZRotationVisible:
+                    triad_input.isZRotationVisible = True
         else:
-            if not triad_input.isZRotationVisible:
-                triad_input.isZRotationVisible = True
-    else:
-        triad_input.isZRotationVisible = False
+            triad_input.isZRotationVisible = False
 
 
 # This event handler is called when the user interacts with any of the inputs in the dialog
