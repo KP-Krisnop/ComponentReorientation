@@ -13,6 +13,7 @@ ui = app.userInterface
 body_transform_matrix = adsk.core.Matrix3D.create()
 original_occ_transform = adsk.core.Matrix3D.create()
 selected_body = None
+is_valid = False
 
 # TODO *** Specify the command identity information. ***
 CMD_ID = f"{config.COMPANY_NAME}_{config.ADDIN_NAME}_cmdDialog"
@@ -98,7 +99,7 @@ def command_created(args: adsk.core.CommandCreatedEventArgs):
     triad_input = inputs.addTriadCommandInput('triadInput', initial_matrix)
     triad_input.hideAll()
 
-    errorTextInput = inputs.addTextBoxCommandInput('errorTextInput', 'Log', '', 2, True)
+    errorTextInput = inputs.addTextBoxCommandInput('errorTextInput', 'Log', '', 3, True)
     errorTextInput.isFullWidth = True
 
     # TODO Connect to the events that are needed by this command.
@@ -190,24 +191,22 @@ def command_preview(args: adsk.core.CommandEventArgs):
     futil.log(f"{CMD_NAME} Command Preview Event")
     inputs = args.command.commandInputs
 
-    product = app.activeProduct    
-    design = adsk.fusion.Design.cast(product)    
+    product = app.activeProduct
+    design = adsk.fusion.Design.cast(product)
     root_comp = design.rootComponent
-    features = root_comp.features    
+    features = root_comp.features
+
+    global body_transform_matrix, selected_body, is_valid
     
     # Grabing inputs **********************************************************************
 
-    select_face_input = inputs.itemById('selectFaceInput')
-    triad_input = inputs.itemById('triadInput')
-    bool_input = inputs.itemById('boolInput')
-
-    select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
-    triad_input = adsk.core.TriadCommandInput.cast(triad_input)
-    bool_input = adsk.core.BoolValueCommandInput.cast(bool_input)
-
-    global body_transform_matrix, selected_body
+    select_face_input = adsk.core.SelectionCommandInput.cast(inputs.itemById('selectFaceInput'))
+    triad_input = adsk.core.TriadCommandInput.cast(inputs.itemById('triadInput'))
 
     # TODO ******************************** Your code here ********************************
+
+    if not is_valid:
+        return
 
     count = select_face_input.selectionCount
     if count:        
@@ -219,11 +218,6 @@ def command_preview(args: adsk.core.CommandEventArgs):
         body_collection.add(body)
         selected_body = body
 
-        parent_component = body.parentComponent
-        if parent_component == root_comp:
-            futil.log(f'Cannot move body. Body has no parent component')
-            return
-
         root_comp.isOriginFolderLightBulbOn = True
         
         # Find the occurrence that contains the selected_body
@@ -233,7 +227,7 @@ def command_preview(args: adsk.core.CommandEventArgs):
                 if body == selected_body:
                     selected_occurrence = occ
                     selected_occurrence.transform2 = adsk.core.Matrix3D.create()
-                    original_occ_transform
+                    selected_occurrence.isIsolated = True
                     break
             if selected_occurrence:
                 break
@@ -289,32 +283,49 @@ def command_input_changed(args: adsk.core.InputChangedEventArgs):
     changed_input = args.input
     inputs = args.inputs
 
-    product = app.activeProduct    
-    design = adsk.fusion.Design.cast(product)    
+    product = app.activeProduct
+    design = adsk.fusion.Design.cast(product)
     root_comp = design.rootComponent
+
+    global is_valid
 
     # General logging for debug.
     futil.log(f"{CMD_NAME} Input Changed Event fired from a change to {changed_input.id}")
 
     # Grabing inputs **********************************************************************
 
-    select_face_input = inputs.itemById('selectFaceInput')
-    triad_input = inputs.itemById('triadInput')
+    select_face_input = adsk.core.SelectionCommandInput.cast(inputs.itemById('selectFaceInput'))
+    triad_input = adsk.core.TriadCommandInput.cast(inputs.itemById('triadInput'))
+    errorTextInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById('errorTextInput'))
 
     # TODO ******************************** Your code here ********************************
 
-    select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
-    triad_input = adsk.core.TriadCommandInput.cast(triad_input)
-    
     if select_face_input.selectionCount:
         face = select_face_input.selection(0).entity
         face = adsk.fusion.BRepFace.cast(face)
         body = face.body
         parent_component = body.parentComponent
-        
-        if parent_component == root_comp:
-            futil.log(f'Cannot move body. Body has no parent component')
+
+        comp_child_occs = parent_component.occurrences
+        comp_bodies = parent_component.bRepBodies
+        comp_is_root = parent_component == root_comp
+
+        futil.log(f'comp_child_occs >>> {comp_child_occs}')
+        futil.log(f'comp_bodies >>> {comp_bodies}')
+        futil.log(f'comp_is_root >>> {comp_is_root}')
+
+        if comp_child_occs.count > 0:
+            errorTextInput.text = 'ERROR: This component is an assembly.'
+            is_valid = False
+        elif comp_bodies.count > 1:
+            errorTextInput.text = 'ERROR: This component contains more than one body.'
+            is_valid = False
+        elif comp_is_root:
+            errorTextInput.text = 'ERROR: Cannot move root component.'
+            is_valid = False
         else:
+            is_valid = True
+
             if not triad_input.isZRotationVisible:
                 triad_input.isZRotationVisible = True
     else:
@@ -329,36 +340,18 @@ def command_validate_input(args: adsk.core.ValidateInputsEventArgs):
 
     inputs = args.inputs
 
-    product = app.activeProduct    
-    design = adsk.fusion.Design.cast(product)    
-    root_comp = design.rootComponent
-
     # Grabing inputs **********************************************************************
 
-    select_face_input = inputs.itemById('selectFaceInput')
-    errorTextInput = inputs.itemById('errorTextInput')
+    select_face_input = adsk.core.SelectionCommandInput.cast(inputs.itemById('selectFaceInput'))
+    errorTextInput = adsk.core.TextBoxCommandInput.cast(inputs.itemById('errorTextInput'))
 
     # TODO ******************************** Your code here ********************************
-
-    select_face_input = adsk.core.SelectionCommandInput.cast(select_face_input)
-    errorTextInput = adsk.core.TextBoxCommandInput.cast(errorTextInput)
     
     if select_face_input.selectionCount:
-        face = select_face_input.selection(0).entity
-        face = adsk.fusion.BRepFace.cast(face)
-        body = face.body
-        parent_component = body.parentComponent
-        
-        if parent_component == root_comp:
-            args.areInputsValid = False
-            errorTextInput.text = 'Cannot move body. Body has no parent component.'
-            futil.log(f'Cannot move body. Body has no parent component')
-        else:
-            args.areInputsValid = True
-            errorTextInput.text = 'Object moved.'
+        args.areInputsValid = True
     else:
+        args.areInputsValid = False
         errorTextInput.text = 'No face selected.'
-
 
 
 def command_destroy(args: adsk.core.CommandEventArgs):
