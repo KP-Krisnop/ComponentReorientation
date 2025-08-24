@@ -145,6 +145,8 @@ def command_execute(args: adsk.core.CommandEventArgs):
         for body in occ.bRepBodies:
             if body == selected_body:
                 selected_occurrence = occ
+                selected_occurrence.isGrounded = False
+                selected_occurrence.isGroundToParent = False
                 break
         if selected_occurrence:
             break
